@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { motion } from 'framer-motion';
 import { Camera, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { signInWithGoogle } from '../firebase/auth';
 
 const Register = () => {
   const [formData, setFormData] = useState({
@@ -44,9 +45,22 @@ const Register = () => {
     try {
       await register(formData.email, formData.password, formData.name, formData.role);
       toast.success('Account created successfully!');
-      navigate('/dashboard');
+      navigate('/');
     } catch (error: any) {
       toast.error(error.message || 'Registration failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    try {
+      await signInWithGoogle();
+      toast.success('Account created successfully!');
+      navigate('/');
+    } catch (error: any) {
+      toast.error(error.message || 'Google sign-in failed');
     } finally {
       setLoading(false);
     }
@@ -217,6 +231,15 @@ const Register = () => {
             className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-copper-500 hover:bg-copper-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-copper-500 disabled:opacity-50 disabled:cursor-not-allowed font-inter"
           >
             {loading ? 'Creating Account...' : 'Create Account'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleGoogleSignIn}
+            disabled={loading}
+            className="mt-4 w-full bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? 'Signing in...' : 'Or sign in with Google'}
           </button>
 
           <div className="text-center">

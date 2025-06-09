@@ -45,23 +45,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     const result = await signInWithEmailAndPassword(auth, email, password);
-    await loadUserProfile(result.user.uid);
   };
 
   const register = async (email: string, password: string, name: string, role: string = 'client') => {
     const result = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(result.user, { displayName: name });
     
-    const profile: UserProfile = {
-      uid: result.user.uid,
-      email,
-      displayName: name,
-      role: role as 'client' | 'photographer' | 'admin',
-      createdAt: new Date()
-    };
-
-    await setDoc(doc(db, 'users', result.user.uid), profile);
-    setUserProfile(profile);
+    // The createUserDocument in src/firebase/auth.ts (called by the register function in the page) 
+    // handles the Firestore write asynchronously, and onAuthStateChanged will load the profile.
+    // Removed direct setDoc and setUserProfile here to avoid blocking navigation.
   };
 
   const logout = async () => {
@@ -79,14 +71,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
+      setLoading(false);
       if (user) {
-        await loadUserProfile(user.uid);
+        loadUserProfile(user.uid);
       } else {
         setUserProfile(null);
       }
-      setLoading(false);
     });
 
     return unsubscribe;

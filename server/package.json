@@ -1,0 +1,25 @@
+{
+  "name": "photography-platform-server",
+  "version": "1.0.0",
+  "description": "Backend server for photography platform",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "mysql2": "^3.6.5",
+    "firebase-admin": "^11.11.1",
+    "multer": "^1.4.5-lts.1",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "dotenv": "^16.3.1",
+    "exceljs": "^4.4.0",
+    "nodemailer": "^6.9.7",
+    "stripe": "^14.7.0",
+    "cron": "^3.1.6"
+  }
+}

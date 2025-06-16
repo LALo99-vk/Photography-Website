@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Calendar, Clock, MapPin, User, Mail, Phone, MessageSquare } from 'lucide-react';
+import { Calendar, Clock, MapPin, User, Mail, Phone, MessageSquare, Download } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
+import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
 
 const Booking = () => {
-  const { currentUser } = useAuth();
+  const { } = useAuth();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -91,6 +93,68 @@ const Booking = () => {
 
   const nextStep = () => setStep(prev => Math.min(prev + 1, 4));
   const prevStep = () => setStep(prev => Math.max(prev - 1, 1));
+
+  const generatePDF = (formData: any) => {
+    const doc = new jsPDF();
+    
+    // Add header
+    doc.setFontSize(20);
+    doc.text('Booking Details', 105, 20, { align: 'center' });
+    
+    // Add booking information
+    doc.setFontSize(12);
+    doc.text('Event Details:', 20, 40);
+    doc.text(`Event Type: ${formData.eventType.charAt(0).toUpperCase() + formData.eventType.slice(1)}`, 30, 50);
+    doc.text(`Date: ${formData.date}`, 30, 60);
+    doc.text(`Time: ${formData.time}`, 30, 70);
+    doc.text(`Location: ${formData.location}`, 30, 80);
+    doc.text(`Duration: ${formData.duration} hours`, 30, 90);
+    doc.text(`Guest Count: ${formData.guestCount}`, 30, 100);
+    
+    // Add package details
+    doc.text('Package Details:', 20, 120);
+    const selectedPackage = packageTypes.find(p => p.id === formData.packageType);
+    doc.text(`Package: ${selectedPackage?.name}`, 30, 130);
+    doc.text(`Price: ${selectedPackage?.price}`, 30, 140);
+    doc.text(`Duration: ${selectedPackage?.duration}`, 30, 150);
+    
+    // Add additional services
+    doc.text('Additional Services:', 20, 170);
+    let yPos = 180;
+    formData.additionalServices.forEach((serviceId: string) => {
+      const service = additionalServices.find(s => s.id === serviceId);
+      if (service) {
+        doc.text(`• ${service.label} - ${service.price}`, 30, yPos);
+        yPos += 10;
+      }
+    });
+    
+    // Add personal information
+    doc.text('Personal Information:', 20, yPos + 10);
+    doc.text(`Name: ${formData.name}`, 30, yPos + 20);
+    doc.text(`Email: ${formData.email}`, 30, yPos + 30);
+    doc.text(`Phone: ${formData.phone}`, 30, yPos + 40);
+    
+    // Add special requests if any
+    if (formData.specialRequests) {
+      doc.text('Special Requests:', 20, yPos + 60);
+      doc.text(formData.specialRequests, 30, yPos + 70);
+    }
+    
+    // Add total price calculation
+    const basePrice = parseInt(selectedPackage?.price.replace(/[^0-9]/g, '') || '0');
+    const additionalServicesTotal = formData.additionalServices.reduce((total: number, serviceId: string) => {
+      const service = additionalServices.find(s => s.id === serviceId);
+      return total + (parseInt(service?.price.replace(/[^0-9]/g, '') || '0'));
+    }, 0);
+    const totalPrice = basePrice + additionalServicesTotal;
+    
+    doc.text('Total Price:', 20, yPos + 90);
+    doc.text(`$${totalPrice.toLocaleString()}`, 30, yPos + 100);
+    
+    // Save the PDF
+    doc.save('booking-details.pdf');
+  };
 
   return (
     <div className="pt-16 bg-gray-50 min-h-screen">
@@ -449,68 +513,139 @@ const Booking = () => {
           <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="bg-white rounded-2xl shadow-lg p-8"
+            className="bg-white rounded-2xl shadow-lg p-8 space-y-6"
           >
-            <h2 className="font-playfair text-2xl font-bold text-gray-900 mb-6">
-              Review your booking
-            </h2>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="font-playfair text-2xl font-bold text-gray-900">
+                Review Your Booking
+              </h2>
+              <button
+                type="button"
+                onClick={() => generatePDF(formData)}
+                className="flex items-center px-4 py-2 bg-copper-500 text-white rounded-lg hover:bg-copper-600 transition-colors"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Download Details
+              </button>
+            </div>
 
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <h3 className="font-inter font-semibold text-gray-900">Event Details</h3>
-                  <div className="space-y-2 text-sm font-inter">
-                    <p><span className="font-medium">Type:</span> {eventTypes.find(t => t.id === formData.eventType)?.label}</p>
-                    <p><span className="font-medium">Date:</span> {formData.date}</p>
-                    <p><span className="font-medium">Time:</span> {formData.time}</p>
-                    <p><span className="font-medium">Location:</span> {formData.location}</p>
-                    <p><span className="font-medium">Duration:</span> {formData.duration} hours</p>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <h3 className="font-inter font-semibold text-gray-900">Contact Information</h3>
-                  <div className="space-y-2 text-sm font-inter">
-                    <p><span className="font-medium">Name:</span> {formData.name}</p>
-                    <p><span className="font-medium">Email:</span> {formData.email}</p>
-                    <p><span className="font-medium">Phone:</span> {formData.phone}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t pt-6">
-                <h3 className="font-inter font-semibold text-gray-900 mb-4">Package & Pricing</h3>
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="font-inter">
-                      {packageTypes.find(p => p.id === formData.packageType)?.name} Package
-                    </span>
-                    <span className="font-semibold">
-                      {packageTypes.find(p => p.id === formData.packageType)?.price}
-                    </span>
-                  </div>
-                  {formData.additionalServices.length > 0 && (
-                    <div className="space-y-1">
-                      {formData.additionalServices.map(serviceId => {
-                        const service = additionalServices.find(s => s.id === serviceId);
-                        return (
-                          <div key={serviceId} className="flex justify-between text-sm">
-                            <span>{service?.label}</span>
-                            <span>{service?.price}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Event Details */}
+              <div className="space-y-4">
+                <h3 className="font-playfair text-xl font-semibold text-gray-900">Event Details</h3>
+                <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                  <p><span className="font-semibold">Event Type:</span> {formData.eventType.charAt(0).toUpperCase() + formData.eventType.slice(1)}</p>
+                  <p><span className="font-semibold">Date:</span> {formData.date}</p>
+                  <p><span className="font-semibold">Time:</span> {formData.time}</p>
+                  <p><span className="font-semibold">Location:</span> {formData.location}</p>
+                  <p><span className="font-semibold">Duration:</span> {formData.duration} hours</p>
+                  <p><span className="font-semibold">Guest Count:</span> {formData.guestCount}</p>
                 </div>
               </div>
 
-              {formData.specialRequests && (
-                <div className="border-t pt-6">
-                  <h3 className="font-inter font-semibold text-gray-900 mb-2">Special Requests</h3>
-                  <p className="text-sm font-inter text-gray-600">{formData.specialRequests}</p>
+              {/* Package Details */}
+              <div className="space-y-4">
+                <h3 className="font-playfair text-xl font-semibold text-gray-900">Package Details</h3>
+                <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                  {(() => {
+                    const selectedPackage = packageTypes.find(p => p.id === formData.packageType);
+                    return (
+                      <>
+                        <p><span className="font-semibold">Package:</span> {selectedPackage?.name}</p>
+                        <p><span className="font-semibold">Price:</span> {selectedPackage?.price}</p>
+                        <p><span className="font-semibold">Duration:</span> {selectedPackage?.duration}</p>
+                        <div className="mt-2">
+                          <p className="font-semibold">Features:</p>
+                          <ul className="list-disc list-inside">
+                            {selectedPackage?.features.map((feature, index) => (
+                              <li key={index} className="text-gray-600">{feature}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Additional Services */}
+              {formData.additionalServices.length > 0 && (
+                <div className="space-y-4">
+                  <h3 className="font-playfair text-xl font-semibold text-gray-900">Additional Services</h3>
+                  <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                    {formData.additionalServices.map((serviceId: string) => {
+                      const service = additionalServices.find(s => s.id === serviceId);
+                      return service ? (
+                        <p key={serviceId}>
+                          <span className="font-semibold">{service.label}:</span> {service.price}
+                        </p>
+                      ) : null;
+                    })}
+                  </div>
                 </div>
               )}
+
+              {/* Personal Information */}
+              <div className="space-y-4">
+                <h3 className="font-playfair text-xl font-semibold text-gray-900">Personal Information</h3>
+                <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                  <p><span className="font-semibold">Name:</span> {formData.name}</p>
+                  <p><span className="font-semibold">Email:</span> {formData.email}</p>
+                  <p><span className="font-semibold">Phone:</span> {formData.phone}</p>
+                </div>
+              </div>
+
+              {/* Special Requests */}
+              {formData.specialRequests && (
+                <div className="space-y-4">
+                  <h3 className="font-playfair text-xl font-semibold text-gray-900">Special Requests</h3>
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-gray-600">{formData.specialRequests}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Total Price */}
+              <div className="space-y-4">
+                <h3 className="font-playfair text-xl font-semibold text-gray-900">Total Price</h3>
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  {(() => {
+                    const selectedPackage = packageTypes.find(p => p.id === formData.packageType);
+                    const basePrice = parseInt(selectedPackage?.price.replace(/[^0-9]/g, '') || '0');
+                    const additionalServicesTotal = formData.additionalServices.reduce((total: number, serviceId: string) => {
+                      const service = additionalServices.find(s => s.id === serviceId);
+                      return total + (parseInt(service?.price.replace(/[^0-9]/g, '') || '0'));
+                    }, 0);
+                    const totalPrice = basePrice + additionalServicesTotal;
+                    
+                    return (
+                      <div className="space-y-2">
+                        <p><span className="font-semibold">Base Package:</span> ${basePrice.toLocaleString()}</p>
+                        {additionalServicesTotal > 0 && (
+                          <p><span className="font-semibold">Additional Services:</span> ${additionalServicesTotal.toLocaleString()}</p>
+                        )}
+                        <p className="text-lg font-bold text-copper-500">Total: ${totalPrice.toLocaleString()}</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-between mt-8">
+              <button
+                type="button"
+                onClick={prevStep}
+                className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                Back
+              </button>
+              <button
+                type="submit"
+                className="px-6 py-3 bg-copper-500 text-white rounded-lg hover:bg-copper-600 transition-colors"
+              >
+                Confirm Booking
+              </button>
             </div>
           </motion.div>
         )}

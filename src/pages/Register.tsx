@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { motion } from 'framer-motion';
 import { Camera, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { signInWithGoogle } from '../firebase/auth';
+import { signInWithGoogle } from '../supabase/auth';
 
 const Register = () => {
   const [formData, setFormData] = useState({

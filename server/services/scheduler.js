@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { db } from '../index.js';
+import { supabase } from '../index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,11 +21,13 @@ async function generateAutomaticExport() {
     console.log('Starting automatic Excel export...');
 
     // Check if auto export is enabled
-    const [settings] = await db.execute(
-      'SELECT setting_value FROM settings WHERE setting_key = "auto_excel_export"'
-    );
+    const { data: settings } = await supabase
+      .from('settings')
+      .select('setting_value')
+      .eq('setting_key', 'auto_excel_export')
+      .single();
 
-    if (!settings[0] || settings[0].setting_value !== 'true') {
+    if (!settings || settings.setting_value !== 'true') {
       console.log('Auto Excel export is disabled');
       return;
     }
@@ -56,25 +58,49 @@ async function generateAutomaticExport() {
     ];
 
     // Get bookings with photo selection counts
-    const [bookings] = await db.execute(`
-      SELECT 
-        b.*, 
-        u.display_name, 
-        u.email, 
-        u.phone,
-        COUNT(ps.id) as selected_photos_count
-      FROM bookings b
-      JOIN users u ON b.user_id = u.id
-      LEFT JOIN photo_selections ps ON b.id = ps.booking_id
-      GROUP BY b.id
-      ORDER BY b.event_date DESC
-    `);
+    const { data: bookings, error: bookingsError } = await supabase
+      .from('bookings')
+      .select(`
+        *,
+        profiles!bookings_user_id_fkey (
+          display_name,
+          email,
+          phone
+        ),
+        photo_selections!photo_selections_booking_id_fkey (
+          id
+        )
+      `)
+      .order('event_date', { ascending: false });
+
+    if (bookingsError) throw bookingsError;
+
+    // Process bookings to add selection counts
+    const bookingsWithCounts = bookings.map(booking => ({
+      ...booking,
+      display_name: booking.profiles?.display_name,
+      email: booking.profiles?.email,
+      phone: booking.profiles?.phone,
+      selected_photos_count: booking.photo_selections?.length || 0
+    }));
 
     // Add data to bookings sheet
-    bookings.forEach(booking => {
+    bookingsWithCounts.forEach(booking => {
       bookingsSheet.addRow({
-        ...booking,
+        id: booking.id,
+        display_name: booking.display_name,
+        email: booking.email,
+        phone: booking.phone,
+        event_type: booking.event_type,
+        package_type: booking.package_type,
         event_date: booking.event_date ? new Date(booking.event_date).toLocaleDateString() : '',
+        event_time: booking.event_time,
+        location: booking.location,
+        duration: booking.duration,
+        guest_count: booking.guest_count,
+        status: booking.status,
+        total_amount: booking.total_amount,
+        selected_photos_count: booking.selected_photos_count,
         created_at: booking.created_at ? new Date(booking.created_at).toLocaleString() : ''
       });
     });
@@ -102,21 +128,37 @@ async function generateAutomaticExport() {
     ];
 
     // Get photo selections data
-    const [selections] = await db.execute(`
-      SELECT ps.*, p.filename, b.event_type, b.event_date, u.display_name, u.email
-      FROM photo_selections ps
-      JOIN photos p ON ps.photo_id = p.id
-      JOIN bookings b ON ps.booking_id = b.id
-      JOIN users u ON ps.user_id = u.id
-      ORDER BY ps.selected_at DESC
-    `);
+    const { data: selections, error: selectionsError } = await supabase
+      .from('photo_selections')
+      .select(`
+        *,
+        photos!photo_selections_photo_id_fkey (
+          filename
+        ),
+        bookings!photo_selections_booking_id_fkey (
+          event_type,
+          event_date
+        ),
+        profiles!photo_selections_user_id_fkey (
+          display_name,
+          email
+        )
+      `)
+      .order('selected_at', { ascending: false });
+
+    if (selectionsError) throw selectionsError;
 
     // Add data to selections sheet
     selections.forEach(selection => {
       selectionsSheet.addRow({
-        ...selection,
-        event_date: selection.event_date ? new Date(selection.event_date).toLocaleDateString() : '',
-        selected_at: selection.selected_at ? new Date(selection.selected_at).toLocaleString() : ''
+        booking_id: selection.booking_id,
+        display_name: selection.profiles?.display_name,
+        email: selection.profiles?.email,
+        event_type: selection.bookings?.event_type,
+        event_date: selection.bookings?.event_date ? new Date(selection.bookings.event_date).toLocaleDateString() : '',
+        filename: selection.photos?.filename,
+        selected_at: selection.selected_at ? new Date(selection.selected_at).toLocaleString() : '',
+        notes: selection.notes
       });
     });
 
@@ -143,17 +185,28 @@ async function generateAutomaticExport() {
     ];
 
     // Get payments data
-    const [payments] = await db.execute(`
-      SELECT p.*, u.display_name
-      FROM payments p
-      JOIN users u ON p.user_id = u.id
-      ORDER BY p.created_at DESC
-    `);
+    const { data: payments, error: paymentsError } = await supabase
+      .from('payments')
+      .select(`
+        *,
+        profiles!payments_user_id_fkey (
+          display_name
+        )
+      `)
+      .order('created_at', { ascending: false });
+
+    if (paymentsError) throw paymentsError;
 
     // Add data to payments sheet
     payments.forEach(payment => {
       paymentsSheet.addRow({
-        ...payment,
+        id: payment.id,
+        booking_id: payment.booking_id,
+        display_name: payment.profiles?.display_name,
+        amount: payment.amount,
+        currency: payment.currency,
+        status: payment.status,
+        payment_method: payment.payment_method,
         created_at: payment.created_at ? new Date(payment.created_at).toLocaleString() : ''
       });
     });
@@ -198,11 +251,13 @@ async function generateAutomaticExport() {
 async function setupScheduler() {
   try {
     // Get the schedule from settings
-    const [settings] = await db.execute(
-      'SELECT setting_value FROM settings WHERE setting_key = "excel_export_schedule"'
-    );
+    const { data: settings } = await supabase
+      .from('settings')
+      .select('setting_value')
+      .eq('setting_key', 'excel_export_schedule')
+      .single();
 
-    const schedule = settings[0]?.setting_value || '0 2 * * *'; // Default: daily at 2 AM
+    const schedule = settings?.setting_value || '0 2 * * *'; // Default: daily at 2 AM
 
     // Create cron job
     const job = new cron.CronJob(schedule, generateAutomaticExport, null, true, 'America/New_York');

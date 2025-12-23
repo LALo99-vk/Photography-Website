@@ -1,10 +1,9 @@
 import express from 'express';
-import admin from 'firebase-admin';
-import { db } from '../index.js';
+import { supabase } from '../index.js';
 
 const router = express.Router();
 
-// Middleware to verify Firebase token
+// Middleware to verify Supabase JWT token
 export const verifyToken = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -12,8 +11,14 @@ export const verifyToken = async (req, res, next) => {
       return res.status(401).json({ error: 'No token provided' });
     }
 
-    const decodedToken = await admin.auth().verifyIdToken(token);
-    req.user = decodedToken;
+    // Verify token with Supabase
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    
+    if (error || !user) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    req.user = { uid: user.id, email: user.email };
     next();
   } catch (error) {
     console.error('Token verification error:', error);
@@ -26,17 +31,20 @@ router.post('/profile', verifyToken, async (req, res) => {
   try {
     const { uid, email, displayName, role = 'client', phone } = req.body;
     
-    const query = `
-      INSERT INTO users (id, email, display_name, role, phone)
-      VALUES (?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-      display_name = VALUES(display_name),
-      role = VALUES(role),
-      phone = VALUES(phone),
-      updated_at = CURRENT_TIMESTAMP
-    `;
+    const { data, error } = await supabase
+      .from('profiles')
+      .upsert({
+        id: uid,
+        email: email,
+        display_name: displayName,
+        role: role,
+        phone: phone,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'id'
+      });
     
-    await db.execute(query, [uid, email, displayName, role, phone]);
+    if (error) throw error;
     
     res.json({ message: 'Profile updated successfully' });
   } catch (error) {
@@ -50,16 +58,17 @@ router.get('/profile/:uid', verifyToken, async (req, res) => {
   try {
     const { uid } = req.params;
     
-    const [rows] = await db.execute(
-      'SELECT * FROM users WHERE id = ?',
-      [uid]
-    );
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', uid)
+      .single();
     
-    if (rows.length === 0) {
+    if (error || !data) {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    res.json(rows[0]);
+    res.json(data);
   } catch (error) {
     console.error('Get profile error:', error);
     res.status(500).json({ error: 'Failed to get profile' });
@@ -70,12 +79,13 @@ router.get('/profile/:uid', verifyToken, async (req, res) => {
 router.patch('/role/:uid', verifyToken, async (req, res) => {
   try {
     // Check if current user is admin
-    const [currentUser] = await db.execute(
-      'SELECT role FROM users WHERE id = ?',
-      [req.user.uid]
-    );
+    const { data: currentUser, error: userError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', req.user.uid)
+      .single();
     
-    if (!currentUser[0] || currentUser[0].role !== 'admin') {
+    if (userError || !currentUser || currentUser.role !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
     
@@ -86,10 +96,12 @@ router.patch('/role/:uid', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Invalid role' });
     }
     
-    await db.execute(
-      'UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [role, uid]
-    );
+    const { error } = await supabase
+      .from('profiles')
+      .update({ role: role, updated_at: new Date().toISOString() })
+      .eq('id', uid);
+    
+    if (error) throw error;
     
     res.json({ message: 'Role updated successfully' });
   } catch (error) {

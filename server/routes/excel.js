@@ -1,6 +1,6 @@
 import express from 'express';
 import ExcelJS from 'exceljs';
-import { db } from '../index.js';
+import { supabase } from '../index.js';
 import { verifyToken } from './auth.js';
 
 const router = express.Router();
@@ -9,12 +9,13 @@ const router = express.Router();
 router.get('/export', verifyToken, async (req, res) => {
   try {
     // Check if user has permission
-    const [currentUser] = await db.execute(
-      'SELECT role FROM users WHERE id = ?',
-      [req.user.uid]
-    );
+    const { data: currentUser } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', req.user.uid)
+      .single();
     
-    if (!currentUser[0] || !['admin', 'photographer'].includes(currentUser[0].role)) {
+    if (!currentUser || !['admin', 'photographer'].includes(currentUser.role)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -45,37 +46,38 @@ router.get('/export', verifyToken, async (req, res) => {
     ];
 
     // Build query for bookings
-    let bookingsQuery = `
-      SELECT b.*, u.display_name, u.email, u.phone
-      FROM bookings b
-      JOIN users u ON b.user_id = u.id
-    `;
-    
-    const params = [];
-    const conditions = [];
+    let bookingsQuery = supabase
+      .from('bookings')
+      .select(`
+        *,
+        profiles!bookings_user_id_fkey (
+          display_name,
+          email,
+          phone
+        )
+      `);
 
     if (startDate) {
-      conditions.push('b.event_date >= ?');
-      params.push(startDate);
+      bookingsQuery = bookingsQuery.gte('event_date', startDate);
     }
 
     if (endDate) {
-      conditions.push('b.event_date <= ?');
-      params.push(endDate);
+      bookingsQuery = bookingsQuery.lte('event_date', endDate);
     }
 
-    if (conditions.length > 0) {
-      bookingsQuery += ' WHERE ' + conditions.join(' AND ');
-    }
+    bookingsQuery = bookingsQuery.order('event_date', { ascending: false });
 
-    bookingsQuery += ' ORDER BY b.event_date DESC';
-
-    const [bookings] = await db.execute(bookingsQuery, params);
+    const { data: bookings, error: bookingsError } = await bookingsQuery;
+    
+    if (bookingsError) throw bookingsError;
 
     // Add data to bookings sheet
     bookings.forEach(booking => {
       bookingsSheet.addRow({
         ...booking,
+        display_name: booking.profiles?.display_name,
+        email: booking.profiles?.email,
+        phone: booking.profiles?.phone,
         event_date: booking.event_date ? new Date(booking.event_date).toLocaleDateString() : '',
         created_at: booking.created_at ? new Date(booking.created_at).toLocaleString() : ''
       });
@@ -105,28 +107,48 @@ router.get('/export', verifyToken, async (req, res) => {
       ];
 
       // Get photo selections data
-      let selectionsQuery = `
-        SELECT ps.*, p.filename, b.event_type, b.event_date, u.display_name, u.email
-        FROM photo_selections ps
-        JOIN photos p ON ps.photo_id = p.id
-        JOIN bookings b ON ps.booking_id = b.id
-        JOIN users u ON ps.user_id = u.id
-      `;
+      let selectionsQuery = supabase
+        .from('photo_selections')
+        .select(`
+          *,
+          photos!photo_selections_photo_id_fkey (
+            filename
+          ),
+          bookings!photo_selections_booking_id_fkey (
+            event_type,
+            event_date
+          ),
+          profiles!photo_selections_user_id_fkey (
+            display_name,
+            email
+          )
+        `);
 
-      if (conditions.length > 0) {
-        selectionsQuery += ' WHERE ' + conditions.map(c => c.replace('b.event_date', 'b.event_date')).join(' AND ');
+      if (startDate) {
+        selectionsQuery = selectionsQuery.gte('bookings.event_date', startDate);
       }
 
-      selectionsQuery += ' ORDER BY ps.selected_at DESC';
+      if (endDate) {
+        selectionsQuery = selectionsQuery.lte('bookings.event_date', endDate);
+      }
 
-      const [selections] = await db.execute(selectionsQuery, params);
+      selectionsQuery = selectionsQuery.order('selected_at', { ascending: false });
+
+      const { data: selections, error: selectionsError } = await selectionsQuery;
+      
+      if (selectionsError) throw selectionsError;
 
       // Add data to selections sheet
       selections.forEach(selection => {
         selectionsSheet.addRow({
-          ...selection,
-          event_date: selection.event_date ? new Date(selection.event_date).toLocaleDateString() : '',
-          selected_at: selection.selected_at ? new Date(selection.selected_at).toLocaleString() : ''
+          booking_id: selection.booking_id,
+          display_name: selection.profiles?.display_name,
+          email: selection.profiles?.email,
+          event_type: selection.bookings?.event_type,
+          event_date: selection.bookings?.event_date ? new Date(selection.bookings.event_date).toLocaleDateString() : '',
+          filename: selection.photos?.filename,
+          selected_at: selection.selected_at ? new Date(selection.selected_at).toLocaleString() : '',
+          notes: selection.notes
         });
       });
 
@@ -155,17 +177,23 @@ router.get('/export', verifyToken, async (req, res) => {
       ];
 
       // Get payments data
-      const [payments] = await db.execute(`
-        SELECT p.*, u.display_name
-        FROM payments p
-        JOIN users u ON p.user_id = u.id
-        ORDER BY p.created_at DESC
-      `);
+      const { data: payments, error: paymentsError } = await supabase
+        .from('payments')
+        .select(`
+          *,
+          profiles!payments_user_id_fkey (
+            display_name
+          )
+        `)
+        .order('created_at', { ascending: false });
+      
+      if (paymentsError) throw paymentsError;
 
       // Add data to payments sheet
       payments.forEach(payment => {
         paymentsSheet.addRow({
           ...payment,
+          display_name: payment.profiles?.display_name,
           created_at: payment.created_at ? new Date(payment.created_at).toLocaleString() : ''
         });
       });
@@ -198,53 +226,92 @@ router.get('/export', verifyToken, async (req, res) => {
 router.get('/stats', verifyToken, async (req, res) => {
   try {
     // Check if user has permission
-    const [currentUser] = await db.execute(
-      'SELECT role FROM users WHERE id = ?',
-      [req.user.uid]
-    );
+    const { data: currentUser } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', req.user.uid)
+      .single();
     
-    if (!currentUser[0] || !['admin', 'photographer'].includes(currentUser[0].role)) {
+    if (!currentUser || !['admin', 'photographer'].includes(currentUser.role)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Get various statistics
-    const [bookingStats] = await db.execute(`
-      SELECT 
-        COUNT(*) as total_bookings,
-        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_bookings,
-        COUNT(CASE WHEN status = 'confirmed' THEN 1 END) as confirmed_bookings,
-        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_bookings,
-        COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_bookings
-      FROM bookings
-    `);
+    // Get booking statistics
+    const { count: totalBookings } = await supabase
+      .from('bookings')
+      .select('*', { count: 'exact', head: true });
 
-    const [photoStats] = await db.execute(`
-      SELECT 
-        COUNT(*) as total_photos,
-        COUNT(CASE WHEN is_edited = 1 THEN 1 END) as edited_photos
-      FROM photos
-    `);
+    const { count: pendingBookings } = await supabase
+      .from('bookings')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending');
 
-    const [selectionStats] = await db.execute(`
-      SELECT 
-        COUNT(*) as total_selections,
-        COUNT(DISTINCT user_id) as clients_with_selections
-      FROM photo_selections
-    `);
+    const { count: confirmedBookings } = await supabase
+      .from('bookings')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'confirmed');
 
-    const [revenueStats] = await db.execute(`
-      SELECT 
-        SUM(amount) as total_revenue,
-        COUNT(*) as total_payments,
-        COUNT(CASE WHEN status = 'succeeded' THEN 1 END) as successful_payments
-      FROM payments
-    `);
+    const { count: completedBookings } = await supabase
+      .from('bookings')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'completed');
+
+    const { count: cancelledBookings } = await supabase
+      .from('bookings')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'cancelled');
+
+    // Get photo statistics
+    const { count: totalPhotos } = await supabase
+      .from('photos')
+      .select('*', { count: 'exact', head: true });
+
+    const { count: editedPhotos } = await supabase
+      .from('photos')
+      .select('*', { count: 'exact', head: true })
+      .eq('is_edited', true);
+
+    // Get selection statistics
+    const { count: totalSelections } = await supabase
+      .from('photo_selections')
+      .select('*', { count: 'exact', head: true });
+
+    const { data: uniqueUsers } = await supabase
+      .from('photo_selections')
+      .select('user_id', { count: 'exact' });
+
+    const clientsWithSelections = new Set(uniqueUsers?.map(u => u.user_id) || []).size;
+
+    // Get revenue statistics
+    const { data: payments } = await supabase
+      .from('payments')
+      .select('amount, status');
+
+    const totalRevenue = payments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+    const totalPayments = payments?.length || 0;
+    const successfulPayments = payments?.filter(p => p.status === 'succeeded').length || 0;
 
     res.json({
-      bookings: bookingStats[0],
-      photos: photoStats[0],
-      selections: selectionStats[0],
-      revenue: revenueStats[0]
+      bookings: {
+        total_bookings: totalBookings || 0,
+        pending_bookings: pendingBookings || 0,
+        confirmed_bookings: confirmedBookings || 0,
+        completed_bookings: completedBookings || 0,
+        cancelled_bookings: cancelledBookings || 0
+      },
+      photos: {
+        total_photos: totalPhotos || 0,
+        edited_photos: editedPhotos || 0
+      },
+      selections: {
+        total_selections: totalSelections || 0,
+        clients_with_selections: clientsWithSelections
+      },
+      revenue: {
+        total_revenue: totalRevenue,
+        total_payments: totalPayments,
+        successful_payments: successfulPayments
+      }
     });
 
   } catch (error) {

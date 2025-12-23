@@ -1,22 +1,14 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { 
-  User, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  updateProfile
-} from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../firebase/config';
+import { supabase } from '../supabase/config';
+import type { User } from '@supabase/supabase-js';
 
 interface UserProfile {
-  uid: string;
+  id: string;
   email: string;
-  displayName: string;
+  display_name: string;
   role: 'client' | 'photographer' | 'admin';
   phone?: string;
-  createdAt: Date;
+  created_at: string;
 }
 
 interface AuthContextType {
@@ -44,44 +36,196 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   const login = async (email: string, password: string) => {
-    const result = await signInWithEmailAndPassword(auth, email, password);
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) throw error;
   };
 
   const register = async (email: string, password: string, name: string, role: string = 'client') => {
-    const result = await createUserWithEmailAndPassword(auth, email, password);
-    await updateProfile(result.user, { displayName: name });
-    
-    // The createUserDocument in src/firebase/auth.ts (called by the register function in the page) 
-    // handles the Firestore write asynchronously, and onAuthStateChanged will load the profile.
-    // Removed direct setDoc and setUserProfile here to avoid blocking navigation.
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          display_name: name,
+        },
+      },
+    });
+    if (error) throw error;
+
+    // Create profile if user was created
+    if (data.user) {
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: data.user.id,
+          email: data.user.email || email,
+          display_name: name,
+          role: role,
+        });
+      if (profileError) console.error('Profile creation error:', profileError);
+    }
   };
 
   const logout = async () => {
-    await signOut(auth);
-    setUserProfile(null);
+    try {
+      // Clear user state first for immediate UI update
+      setCurrentUser(null);
+      setUserProfile(null);
+      
+      // Sign out from Supabase (this will trigger onAuthStateChange)
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        // If signOut fails, restore state (unlikely but handle it)
+        console.error('Sign out error:', error);
+        throw error;
+      }
+      
+      // Ensure state is cleared (onAuthStateChange should handle this, but be explicit)
+      setCurrentUser(null);
+      setUserProfile(null);
+    } catch (error) {
+      console.error('Logout error:', error);
+      throw error;
+    }
   };
 
-  const loadUserProfile = async (uid: string) => {
-    const docRef = doc(db, 'users', uid);
-    const docSnap = await getDoc(docRef);
-    
-    if (docSnap.exists()) {
-      setUserProfile(docSnap.data() as UserProfile);
+  const loadUserProfile = async (userId: string, userEmail?: string, userName?: string) => {
+    try {
+      console.log('Loading user profile for:', userId);
+      
+      // First, try to get existing profile
+      const { data: existingProfile, error: fetchError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      console.log('Profile fetch result:', { existingProfile, fetchError });
+
+      // If profile doesn't exist, create it
+      if (fetchError || !existingProfile) {
+        console.log('Profile does not exist, creating new profile...');
+        
+        // Get user info from auth if not provided
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        
+        if (userError) {
+          console.error('Error getting user:', userError);
+          return;
+        }
+        
+        if (user) {
+          const profileData = {
+            id: userId,
+            email: userEmail || user.email || '',
+            display_name: userName || user.user_metadata?.display_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+            role: 'client' as const,
+          };
+
+          console.log('Inserting profile:', profileData);
+
+          const { data: newProfile, error: createError } = await supabase
+            .from('profiles')
+            .insert(profileData)
+            .select()
+            .single();
+
+          if (createError) {
+            console.error('Error creating user profile:', createError);
+            console.error('Error details:', JSON.stringify(createError, null, 2));
+            // Try to show error to user
+            if (createError.code === '23505') {
+              console.log('Profile already exists (duplicate key), fetching it...');
+              // Profile might have been created by a trigger, try fetching again
+              const { data: retryProfile } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .single();
+              if (retryProfile) {
+                setUserProfile(retryProfile as UserProfile);
+              }
+            }
+            return;
+          }
+
+          if (newProfile) {
+            console.log('Profile created successfully:', newProfile);
+            setUserProfile(newProfile as UserProfile);
+            return;
+          }
+        } else {
+          console.error('No user found in auth');
+        }
+      } else {
+        console.log('Profile exists:', existingProfile);
+      }
+
+      // Update email if it's different (for OAuth users)
+      if (existingProfile && userEmail && existingProfile.email !== userEmail) {
+        const { data: updatedProfile, error: updateError } = await supabase
+          .from('profiles')
+          .update({ email: userEmail })
+          .eq('id', userId)
+          .select()
+          .single();
+
+        if (!updateError && updatedProfile) {
+          setUserProfile(updatedProfile as UserProfile);
+          return;
+        }
+      }
+
+      if (existingProfile) {
+        setUserProfile(existingProfile as UserProfile);
+      }
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     }
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
       setLoading(false);
-      if (user) {
-        loadUserProfile(user.uid);
-      } else {
-        setUserProfile(null);
+      if (session?.user) {
+        loadUserProfile(session.user.id);
       }
     });
 
-    return unsubscribe;
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state changed:', event, session?.user?.id || 'no user');
+      
+      if (event === 'SIGNED_OUT' || !session) {
+        // Explicitly clear state on sign out
+        setCurrentUser(null);
+        setUserProfile(null);
+        setLoading(false);
+      } else {
+        setCurrentUser(session?.user ?? null);
+        setLoading(false);
+        if (session?.user) {
+          // Ensure profile exists and is up to date
+          await loadUserProfile(
+            session.user.id,
+            session.user.email,
+            session.user.user_metadata?.display_name || session.user.user_metadata?.full_name
+          );
+        }
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const value: AuthContextType = {

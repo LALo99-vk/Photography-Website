@@ -1,13 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Calendar, Clock, MapPin, User, Mail, Phone, MessageSquare, Download } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '../supabase/config';
 import toast from 'react-hot-toast';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 
 const Booking = () => {
-  const { } = useAuth();
+  const { currentUser, userProfile, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -26,6 +30,66 @@ const Booking = () => {
 
   const [step, setStep] = useState(1);
 
+  // Redirect to login if not authenticated (after auth loading is complete)
+  useEffect(() => {
+    if (!authLoading && !currentUser) {
+      toast.error('Please log in to make a booking');
+      navigate('/login');
+    }
+  }, [currentUser, navigate, authLoading]);
+
+  // Pre-fill form with user's details when they're available
+  useEffect(() => {
+    if (userProfile) {
+      setFormData(prev => ({
+        ...prev,
+        name: userProfile.display_name || prev.name,
+        email: userProfile.email || prev.email,
+        phone: userProfile.phone || prev.phone,
+      }));
+    } else if (currentUser?.email) {
+      setFormData(prev => ({
+        ...prev,
+        email: currentUser.email || prev.email,
+      }));
+    }
+  }, [userProfile, currentUser]);
+
+  const [packageTypes, setPackageTypes] = useState([
+    {
+      id: 'essential',
+      name: 'Essential',
+      price: '₹1,50,000',
+      duration: '6 hours',
+      features: ['6 hours coverage', '300+ photos', 'Online gallery', '2 photographers']
+    },
+    {
+      id: 'premium',
+      name: 'Premium',
+      price: '₹2,25,000',
+      duration: '8 hours',
+      features: ['8 hours coverage', '500+ photos', 'Online gallery', '2 photographers', 'Engagement session', 'Premium album'],
+      popular: true
+    },
+    {
+      id: 'luxury',
+      name: 'Luxury',
+      price: '₹3,00,000',
+      duration: '10 hours',
+      features: ['10 hours coverage', '700+ photos', 'Online gallery', '2 photographers', 'Engagement session', 'Premium album', 'Drone photography']
+    }
+  ]);
+
+  const [additionalServices, setAdditionalServices] = useState([
+    { id: 'drone', label: 'Drone Photography', price: '₹25,000' },
+    { id: 'videography', label: 'Wedding Videography', price: '₹65,000' },
+    { id: 'album', label: 'Premium Album', price: '₹40,000' },
+    { id: 'prints', label: 'Print Package', price: '₹15,000' },
+    { id: 'rush', label: 'Rush Delivery', price: '₹20,000' }
+  ]);
+
+  const [pricingLoading, setPricingLoading] = useState(false);
+
   const eventTypes = [
     { id: 'wedding', label: 'Wedding', description: 'Complete wedding day coverage' },
     { id: 'engagement', label: 'Engagement', description: 'Romantic couple session' },
@@ -35,44 +99,61 @@ const Booking = () => {
     { id: 'newborn', label: 'Newborn', description: 'Precious newborn photography' }
   ];
 
-  const packageTypes = [
-    {
-      id: 'essential',
-      name: 'Essential',
-      price: '$1,899',
-      duration: '6 hours',
-      features: ['6 hours coverage', '300+ photos', 'Online gallery', '2 photographers']
-    },
-    {
-      id: 'premium',
-      name: 'Premium',
-      price: '$2,899',
-      duration: '8 hours',
-      features: ['8 hours coverage', '500+ photos', 'Online gallery', '2 photographers', 'Engagement session', 'Premium album'],
-      popular: true
-    },
-    {
-      id: 'luxury',
-      name: 'Luxury',
-      price: '$3,899',
-      duration: '10 hours',
-      features: ['10 hours coverage', '700+ photos', 'Online gallery', '2 photographers', 'Engagement session', 'Premium album', 'Drone photography']
-    }
-  ];
-
-  const additionalServices = [
-    { id: 'drone', label: 'Drone Photography', price: '$300' },
-    { id: 'videography', label: 'Wedding Videography', price: '$800' },
-    { id: 'album', label: 'Premium Album', price: '$500' },
-    { id: 'prints', label: 'Print Package', price: '$200' },
-    { id: 'rush', label: 'Rush Delivery', price: '$250' }
-  ];
+  // Fetch pricing from backend
+  useEffect(() => {
+    const fetchPricing = async () => {
+      try {
+        setPricingLoading(true);
+        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+        const res = await fetch(`${API_URL}/api/pricing`);
+        if (!res.ok) throw new Error('Failed to load pricing');
+        const data = await res.json();
+        if (data?.packages?.length) {
+          setPackageTypes(
+            data.packages.map((p: any) => ({
+              id: p.slug,
+              name: p.name,
+              price: `₹${Number(p.price).toLocaleString('en-IN')}`,
+              duration: p.duration || '',
+              features: Array.isArray(p.features) ? p.features : [],
+              popular: p.slug === 'premium'
+            }))
+          );
+        }
+        if (data?.addons?.length) {
+          setAdditionalServices(
+            data.addons.map((a: any) => ({
+              id: a.slug,
+              label: a.name,
+              price: `₹${Number(a.price).toLocaleString('en-IN')}`
+            }))
+          );
+        }
+      } catch (err) {
+        console.warn('Pricing fetch failed, using defaults', err);
+      } finally {
+        setPricingLoading(false);
+      }
+    };
+    fetchPricing();
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+    const { name, value } = e.target;
+    
+    // Special handling for phone number to ensure only digits
+    if (name === 'phone') {
+      const phoneValue = value.replace(/\D/g, '').slice(0, 10);
+      setFormData({
+        ...formData,
+        [name]: phoneValue
+      });
+    } else {
+      setFormData({
+        ...formData,
+        [name]: value
+      });
+    }
   };
 
   const handleServiceToggle = (serviceId: string) => {
@@ -84,11 +165,332 @@ const Booking = () => {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Here you would typically send the data to your backend
-    toast.success('Booking request submitted! We\'ll contact you within 24 hours.');
-    console.log('Booking data:', formData);
+    console.log('Form submitted!', { step, formData });
+    
+    // Check if user is logged in
+    if (!currentUser) {
+      console.error('No current user');
+      toast.error('Please log in to make a booking');
+      navigate('/login');
+      return;
+    }
+
+    // Only validate phone if it's provided and not empty
+    if (formData.phone && formData.phone.trim() !== '') {
+      const phoneRegex = /^[6-9]\d{9}$/;
+      if (!phoneRegex.test(formData.phone)) {
+        console.error('Invalid phone number:', formData.phone);
+        toast.error('Please enter a valid 10-digit Indian mobile number (starting with 6-9)');
+        return;
+      }
+    }
+
+    console.log('Starting booking submission...');
+    setLoading(true);
+
+    try {
+      console.log('Step 1: Calculating total amount...');
+      // Calculate total amount
+      const selectedPackage = packageTypes.find(p => p.id === formData.packageType);
+      console.log('Selected package:', selectedPackage);
+      const basePrice = parseInt(selectedPackage?.price.replace(/[^0-9]/g, '') || '0');
+      console.log('Base price:', basePrice);
+      const additionalServicesTotal = formData.additionalServices.reduce((total: number, serviceId: string) => {
+        const service = additionalServices.find(s => s.id === serviceId);
+        return total + (parseInt(service?.price.replace(/[^0-9]/g, '') || '0'));
+      }, 0);
+      console.log('Additional services total:', additionalServicesTotal);
+      const totalAmount = basePrice + additionalServicesTotal;
+      console.log('Total amount:', totalAmount);
+
+      console.log('Step 2: Getting auth session...');
+      
+      if (!currentUser) {
+        console.error('No currentUser available');
+        throw new Error('Not authenticated. Please log in again.');
+      }
+      
+      // Get auth token - try localStorage first (faster, no network call)
+      let session, sessionError;
+      console.log('Getting session token...');
+      
+      // Approach 1: Try to get from localStorage directly (fastest)
+      try {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+        if (supabaseUrl) {
+          // Supabase stores session in localStorage with key pattern: sb-{project-ref}-auth-token
+          const projectRef = supabaseUrl.split('//')[1]?.split('.')[0];
+          const storageKey = `sb-${projectRef}-auth-token`;
+          const storedData = localStorage.getItem(storageKey);
+          
+          if (storedData) {
+            const parsed = JSON.parse(storedData);
+            if (parsed?.access_token && parsed?.expires_at) {
+              // Check if token is still valid (not expired)
+              const expiresAt = parsed.expires_at * 1000; // Convert to milliseconds
+              const now = Date.now();
+              
+              if (now < expiresAt) {
+                console.log('Found valid session in localStorage');
+                session = {
+                  access_token: parsed.access_token,
+                  refresh_token: parsed.refresh_token,
+                  expires_at: parsed.expires_at,
+                  expires_in: parsed.expires_in,
+                  token_type: parsed.token_type,
+                  user: currentUser
+                };
+                sessionError = null;
+              } else {
+                console.log('Session in localStorage is expired, refreshing...');
+              }
+            }
+          }
+        }
+      } catch (storageErr) {
+        console.log('Could not get session from localStorage:', storageErr);
+      }
+      
+      // Approach 2: If localStorage didn't work, try getSession() with timeout
+      if (!session) {
+        console.log('Trying getSession() API...');
+        try {
+          const sessionPromise = supabase.auth.getSession();
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('TIMEOUT')), 2000);
+          });
+          
+          const result = await Promise.race([sessionPromise, timeoutPromise]);
+          const sessionData = result as { data: { session: any } | null; error: any };
+          session = sessionData?.data?.session;
+          sessionError = sessionData?.error;
+          console.log('Session retrieved via getSession():', { hasSession: !!session, error: sessionError });
+        } catch (err: any) {
+          console.error('getSession() failed or timed out:', err);
+          // If getSession fails, we already tried localStorage, so throw error
+          throw new Error('Failed to get authentication session. Please refresh the page and log in again.');
+        }
+      }
+      
+      if (sessionError || !session) {
+        console.error('Session error or missing:', { sessionError, hasSession: !!session });
+        throw new Error('Not authenticated. Please log in again.');
+      }
+      
+      if (!session.access_token) {
+        console.error('Session exists but no access token');
+        throw new Error('Invalid session. Please log in again.');
+      }
+      
+      console.log('Step 3: Session obtained, making API call...');
+      console.log('Session token exists:', !!session.access_token);
+
+      // Submit booking to backend
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      console.log('API URL:', API_URL);
+      
+      // Quick health check to verify server is reachable
+      try {
+        console.log('Checking server health...');
+        const healthCheck = await fetch(`${API_URL}/api/health`, { 
+          method: 'GET',
+          signal: AbortSignal.timeout(5000) // 5 second timeout for health check
+        });
+        console.log('Health check response:', healthCheck.status);
+        if (!healthCheck.ok) {
+          throw new Error('Server health check failed');
+        }
+      } catch (healthError: any) {
+        console.error('Health check failed:', healthError);
+        throw new Error('Cannot connect to server. Please make sure the backend server is running on port 5000.');
+      }
+
+      console.log('Submitting booking...', {
+        eventType: formData.eventType,
+        packageType: formData.packageType,
+        eventDate: formData.date,
+        totalAmount
+      });
+      
+      const requestBody = {
+        eventType: formData.eventType,
+        packageType: formData.packageType,
+        eventDate: formData.date,
+        eventTime: formData.time,
+        location: formData.location,
+        duration: parseInt(formData.duration),
+        guestCount: formData.guestCount ? parseInt(formData.guestCount) : null,
+        additionalServices: formData.additionalServices,
+        specialRequests: formData.specialRequests,
+        budgetRange: formData.budget,
+        totalAmount: totalAmount,
+      };
+      
+      console.log('Request body:', requestBody);
+      console.log('Step 4: Making fetch request to:', `${API_URL}/api/bookings`);
+      
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        console.error('Request timeout after 30 seconds');
+      }, 30000);
+      
+      console.log('Step 5: Fetch call starting...');
+      console.log('About to call fetch with URL:', `${API_URL}/api/bookings`);
+      let response;
+      try {
+        console.log('Fetch call initiated at:', new Date().toISOString());
+        response = await fetch(`${API_URL}/api/bookings`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal,
+        });
+        console.log('Step 6: Fetch completed, response received at:', new Date().toISOString());
+      } catch (fetchErr: any) {
+        clearTimeout(timeoutId);
+        console.error('Fetch error caught:', fetchErr);
+        console.error('Fetch error name:', fetchErr.name);
+        console.error('Fetch error message:', fetchErr.message);
+        if (fetchErr.name === 'AbortError') {
+          throw new Error('Request timed out. The server may not be responding. Please check if the backend server is running.');
+        }
+        throw fetchErr;
+      }
+
+      clearTimeout(timeoutId);
+      console.log('Response received:', response.status, response.statusText);
+
+      if (!response.ok) {
+        let errorData;
+        try {
+          const text = await response.text();
+          errorData = text ? JSON.parse(text) : { error: `Server error: ${response.status}` };
+        } catch (e) {
+          errorData = { error: `Server error: ${response.status} ${response.statusText}` };
+        }
+        console.error('Booking error response:', errorData);
+        throw new Error(errorData.error || `Failed to create booking (${response.status})`);
+      }
+
+      const bookingData = await response.json();
+      console.log('Booking created successfully:', bookingData);
+      console.log('Step 7: Processing success response...');
+      
+      // Update user profile with phone if provided (completely non-blocking - skip for now to avoid blocking)
+      // We'll handle this separately to not block the UI update
+      if (formData.phone && formData.phone !== userProfile?.phone) {
+        console.log('Phone number will be updated separately (non-blocking)');
+        // Schedule update for later - don't block UI
+        setTimeout(async () => {
+          try {
+            const { error: phoneError } = await supabase
+              .from('profiles')
+              .update({ phone: formData.phone })
+              .eq('id', currentUser.id);
+            if (phoneError) {
+              console.warn('Failed to update phone number:', phoneError);
+            } else {
+              console.log('Phone number updated successfully');
+            }
+          } catch (phoneUpdateError: any) {
+            console.warn('Error updating phone number:', phoneUpdateError);
+          }
+        }, 100);
+      }
+
+      console.log('Step 8: Clearing loading state...');
+      // Clear loading state immediately
+      setLoading(false);
+      console.log('Loading state cleared');
+      
+      console.log('Step 9: Showing success toast...');
+      try {
+        toast.success('Booking request submitted successfully! We\'ll contact you within 24 hours.');
+        console.log('Toast shown');
+      } catch (toastError) {
+        console.error('Toast error:', toastError);
+      }
+      
+      console.log('Step 10: Resetting form and step...');
+      try {
+        // Reset form
+        setFormData({
+          name: userProfile?.display_name || '',
+          email: userProfile?.email || currentUser.email || '',
+          phone: userProfile?.phone || '',
+          eventType: 'wedding',
+          packageType: 'premium',
+          date: '',
+          time: '',
+          location: '',
+          duration: '8',
+          guestCount: '',
+          additionalServices: [],
+          specialRequests: '',
+          budget: ''
+        });
+        setStep(1);
+        console.log('Form reset complete, step set to 1');
+      } catch (resetError) {
+        console.error('Form reset error:', resetError);
+      }
+      
+      // Navigate to dashboard after a short delay to show the toast
+      console.log('Step 11: Setting up navigation to dashboard in 1.5 seconds...');
+      try {
+        setTimeout(() => {
+          console.log('Step 12: Navigating to dashboard now...');
+          try {
+            navigate('/dashboard');
+            console.log('Navigation called');
+          } catch (navError) {
+            console.error('Navigation error:', navError);
+          }
+        }, 1500);
+        console.log('Navigation timeout set');
+      } catch (timeoutError) {
+        console.error('Timeout setup error:', timeoutError);
+      }
+      
+      console.log('Step 13: Success handler complete');
+      
+    } catch (error: any) {
+      console.error('Booking submission error:', error);
+      let errorMessage = 'Failed to submit booking. Please try again.';
+      
+      if (error.name === 'AbortError') {
+        errorMessage = 'Request timed out. Please check your connection and try again.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      } else if (error instanceof TypeError && error.message.includes('fetch')) {
+        errorMessage = 'Cannot connect to server. Please make sure the backend server is running.';
+      }
+      
+      console.error('Error details:', {
+        message: error.message,
+        name: error.name,
+        stack: error.stack
+      });
+      
+      toast.error(errorMessage);
+    } finally {
+      // Only set loading to false if it wasn't already cleared in the success path
+      // (to avoid race conditions)
+      setLoading(prev => {
+        if (prev) {
+          console.log('Finally block: clearing loading state');
+          return false;
+        }
+        return prev;
+      });
+    }
   };
 
   const nextStep = () => setStep(prev => Math.min(prev + 1, 4));
@@ -150,7 +552,7 @@ const Booking = () => {
     const totalPrice = basePrice + additionalServicesTotal;
     
     doc.text('Total Price:', 20, yPos + 90);
-    doc.text(`$${totalPrice.toLocaleString()}`, 30, yPos + 100);
+    doc.text(`₹${totalPrice.toLocaleString('en-IN')}`, 30, yPos + 100);
     
     // Save the PDF
     doc.save('booking-details.pdf');
@@ -198,7 +600,14 @@ const Booking = () => {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <form 
+        onSubmit={(e) => {
+          console.log('Form onSubmit triggered!', { step });
+          handleSubmit(e);
+        }} 
+        className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12"
+        noValidate
+      >
         {/* Step 1: Event Details */}
         {step === 1 && (
           <motion.div
@@ -465,11 +874,18 @@ const Booking = () => {
                   type="tel"
                   name="phone"
                   required
-                  placeholder="(555) 123-4567"
+                  placeholder="9876543210"
+                  pattern="[6-9][0-9]{9}"
+                  maxLength={10}
                   className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:ring-copper-500 focus:border-copper-500 font-inter"
                   value={formData.phone}
-                  onChange={handleChange}
+                  onChange={(e) => {
+                    // Only allow numbers and limit to 10 digits
+                    const value = e.target.value.replace(/\D/g, '').slice(0, 10);
+                    setFormData({ ...formData, phone: value });
+                  }}
                 />
+                <p className="mt-1 text-xs text-gray-500 font-inter">Enter 10-digit Indian mobile number (starting with 6-9)</p>
               </div>
 
               <div>
@@ -483,10 +899,10 @@ const Booking = () => {
                   onChange={handleChange}
                 >
                   <option value="">Select budget range</option>
-                  <option value="under-2000">Under $2,000</option>
-                  <option value="2000-3000">$2,000 - $3,000</option>
-                  <option value="3000-5000">$3,000 - $5,000</option>
-                  <option value="5000-plus">$5,000+</option>
+                  <option value="under-2000">Under ₹2,00,000</option>
+                  <option value="2000-3000">₹2,00,000 - ₹3,00,000</option>
+                  <option value="3000-5000">₹3,00,000 - ₹5,00,000</option>
+                  <option value="5000-plus">₹5,00,000+</option>
                 </select>
               </div>
             </div>
@@ -620,11 +1036,11 @@ const Booking = () => {
                     
                     return (
                       <div className="space-y-2">
-                        <p><span className="font-semibold">Base Package:</span> ${basePrice.toLocaleString()}</p>
+                        <p><span className="font-semibold">Base Package:</span> ₹{basePrice.toLocaleString('en-IN')}</p>
                         {additionalServicesTotal > 0 && (
-                          <p><span className="font-semibold">Additional Services:</span> ${additionalServicesTotal.toLocaleString()}</p>
+                          <p><span className="font-semibold">Additional Services:</span> ₹{additionalServicesTotal.toLocaleString('en-IN')}</p>
                         )}
-                        <p className="text-lg font-bold text-copper-500">Total: ${totalPrice.toLocaleString()}</p>
+                        <p className="text-lg font-bold text-copper-500">Total: ₹{totalPrice.toLocaleString('en-IN')}</p>
                       </div>
                     );
                   })()}
@@ -642,9 +1058,20 @@ const Booking = () => {
               </button>
               <button
                 type="submit"
-                className="px-6 py-3 bg-copper-500 text-white rounded-lg hover:bg-copper-600 transition-colors"
+                disabled={loading}
+                onClick={(e) => {
+                  console.log('Submit button clicked!', { step, loading, formData });
+                  // Don't prevent default here - let form handle it
+                  // But ensure we're on step 4
+                  if (step !== 4) {
+                    e.preventDefault();
+                    console.warn('Not on step 4, preventing submit');
+                    return false;
+                  }
+                }}
+                className="px-6 py-3 bg-copper-500 text-white rounded-lg hover:bg-copper-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-inter"
               >
-                Confirm Booking
+                {loading ? 'Submitting...' : 'Confirm Booking'}
               </button>
             </div>
           </motion.div>
@@ -671,14 +1098,7 @@ const Booking = () => {
               >
                 Next Step
               </button>
-            ) : (
-              <button
-                type="submit"
-                className="px-8 py-3 bg-copper-500 text-white rounded-lg font-inter font-medium hover:bg-copper-600 transition-colors"
-              >
-                Submit Booking Request
-              </button>
-            )}
+            ) : null}
           </div>
         </div>
       </form>

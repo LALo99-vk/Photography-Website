@@ -8,14 +8,35 @@ interface ProtectedRouteProps {
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole }) => {
-  const { currentUser, userProfile } = useAuth();
+  const { currentUser, userProfile, loading } = useAuth();
 
-  if (!currentUser) {
-    return <Navigate to="/login\" replace />;
+  // Show loading state while checking auth
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="font-inter text-gray-600">Loading...</p>
+      </div>
+    );
   }
 
-  if (requiredRole && userProfile?.role !== requiredRole) {
-    return <Navigate to="/dashboard" replace />;
+  // Redirect to login if not authenticated
+  if (!currentUser) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Check role requirement
+  if (requiredRole) {
+    if (!userProfile) {
+      return (
+        <div className="flex items-center justify-center min-h-screen">
+          <p className="font-inter text-gray-600">Loading profile...</p>
+        </div>
+      );
+    }
+
+    if (userProfile.role !== requiredRole) {
+      return <Navigate to="/" replace />;
+    }
   }
 
   return <>{children}</>;

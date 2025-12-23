@@ -1,60 +1,89 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Check, Clock, Image, Video, Gift } from 'lucide-react';
 
 const Services = () => {
   const [activeTab, setActiveTab] = useState('weddings');
 
+  const [weddingPackages, setWeddingPackages] = useState([
+    {
+      name: 'Essential',
+      price: '₹1,50,000',
+      duration: '6 hours',
+      features: [
+        '6 hours of coverage',
+        '300+ edited photos',
+        'Online gallery',
+        'Print release',
+        '2 photographers'
+      ]
+    },
+    {
+      name: 'Premium',
+      price: '₹2,25,000',
+      duration: '8 hours',
+      features: [
+        '8 hours of coverage',
+        '500+ edited photos',
+        'Online gallery',
+        'Print release',
+        '2 photographers',
+        'Engagement session included',
+        'Premium album (50 pages)'
+      ],
+      popular: true
+    },
+    {
+      name: 'Luxury',
+      price: '₹3,00,000',
+      duration: '10 hours',
+      features: [
+        '10 hours of coverage',
+        '700+ edited photos',
+        'Online gallery',
+        'Print release',
+        '2 photographers',
+        'Engagement session included',
+        'Premium album (100 pages)',
+        'Drone photography',
+        'Second shooter'
+      ]
+    }
+  ]);
+
+  useEffect(() => {
+    const fetchPricing = async () => {
+      try {
+        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+        const res = await fetch(`${API_URL}/api/pricing`);
+        if (!res.ok) throw new Error('Failed to load pricing');
+        const data = await res.json();
+        if (data?.packages?.length) {
+          setWeddingPackages(
+            data.packages.map((p: any) => ({
+              name: p.name,
+              price: `₹${Number(p.price).toLocaleString('en-IN')}`,
+              duration: p.duration || '',
+              features: Array.isArray(p.features) && p.features.length
+                ? p.features
+                : ['High quality coverage', 'Edited photos', 'Online gallery'],
+              popular: p.slug === 'premium'
+            }))
+          );
+        }
+      } catch (err) {
+        console.warn('Pricing fetch failed, using defaults', err);
+      }
+    };
+    fetchPricing();
+  }, []);
+
   const services = {
     weddings: {
       title: 'Wedding Photography',
       hero: 'https://images.pexels.com/photos/1024993/pexels-photo-1024993.jpeg?auto=compress&cs=tinysrgb&w=1200',
       description: 'Capture every precious moment of your special day with our elegant wedding photography services.',
-      packages: [
-        {
-          name: 'Essential',
-          price: '$1,899',
-          duration: '6 hours',
-          features: [
-            '6 hours of coverage',
-            '300+ edited photos',
-            'Online gallery',
-            'Print release',
-            '2 photographers'
-          ]
-        },
-        {
-          name: 'Premium',
-          price: '$2,899',
-          duration: '8 hours',
-          features: [
-            '8 hours of coverage',
-            '500+ edited photos',
-            'Online gallery',
-            'Print release',
-            '2 photographers',
-            'Engagement session included',
-            'Premium album (50 pages)'
-          ],
-          popular: true
-        },
-        {
-          name: 'Luxury',
-          price: '$3,899',
-          duration: '10 hours',
-          features: [
-            '10 hours of coverage',
-            '700+ edited photos',
-            'Online gallery',
-            'Print release',
-            '2 photographers',
-            'Engagement session included',
-            'Premium album (100 pages)',
-            'Drone photography',
-            'Second shooter'
-          ]
-        }
-      ]
+      packages: weddingPackages
     },
     portraits: {
       title: 'Portrait Photography',
@@ -63,7 +92,7 @@ const Services = () => {
       packages: [
         {
           name: 'Individual',
-          price: '$299',
+          price: '₹25,000',
           duration: '1 hour',
           features: [
             '1 hour session',
@@ -75,7 +104,7 @@ const Services = () => {
         },
         {
           name: 'Family',
-          price: '$449',
+          price: '₹35,000',
           duration: '1.5 hours',
           features: [
             '1.5 hour session',
@@ -89,7 +118,7 @@ const Services = () => {
         },
         {
           name: 'Extended',
-          price: '$649',
+          price: '₹50,000',
           duration: '2 hours',
           features: [
             '2 hour session',
@@ -110,7 +139,7 @@ const Services = () => {
       packages: [
         {
           name: 'Basic Coverage',
-          price: '$599',
+          price: '₹50,000',
           duration: '3 hours',
           features: [
             '3 hours of coverage',
@@ -122,7 +151,7 @@ const Services = () => {
         },
         {
           name: 'Standard Coverage',
-          price: '$999',
+          price: '₹80,000',
           duration: '5 hours',
           features: [
             '5 hours of coverage',
@@ -136,7 +165,7 @@ const Services = () => {
         },
         {
           name: 'Full Coverage',
-          price: '$1,499',
+          price: '₹1,20,000',
           duration: '8 hours',
           features: [
             '8 hours of coverage',
@@ -153,12 +182,12 @@ const Services = () => {
   };
 
   const addOns = [
-    { name: 'Additional Hour of Coverage', price: '$150' },
-    { name: 'Drone Photography', price: '$300' },
-    { name: 'Second Photographer', price: '$400' },
-    { name: 'Premium Album (50 pages)', price: '$500' },
-    { name: 'Canvas Print Set', price: '$200' },
-    { name: 'Rush Delivery (48 hours)', price: '$250' }
+    { name: 'Additional Hour of Coverage', price: '₹12,000' },
+    { name: 'Drone Photography', price: '₹25,000' },
+    { name: 'Second Photographer', price: '₹30,000' },
+    { name: 'Premium Album (50 pages)', price: '₹40,000' },
+    { name: 'Canvas Print Set', price: '₹15,000' },
+    { name: 'Rush Delivery (48 hours)', price: '₹20,000' }
   ];
 
   const tabs = [

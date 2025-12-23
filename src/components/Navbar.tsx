@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Camera, Menu, X, User, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -13,10 +14,14 @@ const Navbar = () => {
 
   const handleLogout = async () => {
     try {
+      setShowUserMenu(false); // Close menu immediately
       await logout();
-      navigate('/');
+      toast.success('Logged out successfully');
+      // Force a full page reload to ensure clean state
+      window.location.href = '/';
     } catch (error) {
       console.error('Logout error:', error);
+      toast.error('Failed to log out');
     }
   };
 
@@ -66,7 +71,7 @@ const Navbar = () => {
                   className="flex items-center space-x-2 text-gray-700 hover:text-copper-500"
                 >
                   <User className="h-5 w-5" />
-                  <span className="font-inter text-sm">{userProfile?.displayName}</span>
+                  <span className="font-inter text-sm">{userProfile?.display_name}</span>
                 </button>
                 
                 <AnimatePresence>
